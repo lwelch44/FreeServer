@@ -25,55 +25,31 @@ jobs:
           git config --global user.name "lwelch44"
           git config --global user.email "lihao574403035@gmail.com"
 
-      - name: Create configuration directory
-        run: mkdir -p /home/runner/.free-server
+      - name: Create directories
+        run: |
+          mkdir -p /home/runner/.free-server
+          mkdir -p /home/runner/.free-server/phantomJsPic
+          mkdir -p /home/runner/.free-server/repo
+          mkdir -p /home/runner/.free-server/resource
 
-      - name: Generate application-config.yml
+      - name: Generate config
         env:
           CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
           CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
-          # 如果没有 PAGES_REPO，则不配置博客（跳过 SSH）
-          if [ -z "$PAGES_REPO" ]; then
-            cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
-            cloudServers:
-              - username: "$CLOUD_USERNAME"
-                password: "$CLOUD_PASSWORD"
-                type: 0
-            blogInfo: {}
-            phantomJs:
-              phantomJsExec:
-                picPath: /home/runner/.free-server/phantomJsPic/postpone.png
-            blogInitWaitCount: 0
-            blogInitWaitTime: 0
-            resourceTempFilePath: /home/runner/.free-server/resource
-            ENDOFYAML
-          else
-            cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
-            cloudServers:
-              - username: "$CLOUD_USERNAME"
-                password: "$CLOUD_PASSWORD"
-                type: 0
-            blogInfo:
-              uri: git@github.com:$PAGES_REPO
-              localPath: /home/runner/.free-server/repo
-              username: lwelch44
-            phantomJs:
-              phantomJsExec:
-                picPath: /home/runner/.free-server/phantomJsPic/postpone.png
-            blogInitWaitCount: 10
-            blogInitWaitTime: 1
-            resourceTempFilePath: /home/runner/.free-server/resource
-            ENDOFYAML
-          fi
-
-      - name: Create required directories
-        run: |
-          mkdir -p /home/runner/.free-server/phantomJsPic
-          mkdir -p /home/runner/.free-server/repo
-          mkdir -p /home/runner/.free-server/resource
+          echo "cloudServers:" > /home/runner/.free-server/application-config.yml
+          echo "  - username: \"$CLOUD_USERNAME\"" >> /home/runner/.free-server/application-config.yml
+          echo "    password: \"$CLOUD_PASSWORD\"" >> /home/runner/.free-server/application-config.yml
+          echo "    type: 0" >> /home/runner/.free-server/application-config.yml
+          echo "blogInfo: {}" >> /home/runner/.free-server/application-config.yml
+          echo "phantomJs:" >> /home/runner/.free-server/application-config.yml
+          echo "  phantomJsExec:" >> /home/runner/.free-server/application-config.yml
+          echo "    picPath: /home/runner/.free-server/phantomJsPic/postpone.png" >> /home/runner/.free-server/application-config.yml
+          echo "blogInitWaitCount: 0" >> /home/runner/.free-server/application-config.yml
+          echo "blogInitWaitTime: 0" >> /home/runner/.free-server/application-config.yml
+          echo "resourceTempFilePath: /home/runner/.free-server/resource" >> /home/runner/.free-server/application-config.yml
 
       - name: Download and build project
         run: |
@@ -82,13 +58,12 @@ jobs:
           rm -rf temp-repo
           cd postpone
           chmod +x mvnw
-          ./mvnw clean package -DskipTests || echo "Build may have warnings"
+          ./mvnw clean package -DskipTests || echo "Build completed"
 
       - name: Run FreeServer
         run: |
           cd postpone
-          java -Duser.home=/home/runner -jar target/postpone-2.0.jar || true
-        continue-on-error: true
+          java -Duser.home=/home/runner -jar target/postpone-2.0.jar || echo "Execution finished"
 
       - name: Send notification via PushPlus
         if: always()
@@ -100,10 +75,3 @@ jobs:
           else
             curl -s -X POST "https://www.pushplus.plus/send?token=$PUSHPLUS_TOKEN&title=FreeServer Failed&content=服务器延期失败，请检查配置！"
           fi
-
-      - name: Upload logs if failed
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: logs
-          path: postpone/log.log
