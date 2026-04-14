@@ -36,8 +36,6 @@ jobs:
         env:
           CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
           CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-          PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
           echo "cloudServers:" > /home/runner/.free-server/application-config.yml
           echo "  - username: \"$CLOUD_USERNAME\"" >> /home/runner/.free-server/application-config.yml
@@ -67,11 +65,9 @@ jobs:
 
       - name: Send notification via PushPlus
         if: always()
-        env:
-          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: |
           if [ "${{ job.status }}" = "success" ]; then
-            curl -s -X POST "https://www.pushplus.plus/send?token=$PUSHPLUS_TOKEN&title=FreeServer Success&content=服务器延期成功完成！"
+            curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Success&content=服务器延期成功完成！"
           else
-            curl -s -X POST "https://www.pushplus.plus/send?token=$PUSHPLUS_TOKEN&title=FreeServer Failed&content=服务器延期失败，请检查配置！"
+            curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Failed&content=服务器延期失败，请检查配置！"
           fi
