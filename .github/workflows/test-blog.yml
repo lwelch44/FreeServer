@@ -1,0 +1,233 @@
+name: Test Blog Functionality
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Test type'
+        required: false
+        default: 'all'
+
+jobs:
+  test-blog:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "=== Setting up SSH ==="
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # 保存私钥
+          echo "$SSH_PRIVATE_KEY" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # 生成公钥
+          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub 2>/dev/null || echo "Failed to generate public key"
+          
+          # 创建SSH配置
+          cat > ~/.ssh/config << EOF
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+          EOF
+          
+          # 添加known_hosts
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          
+          # 测试连接
+          echo "Testing SSH connection to GitHub..."
+          ssh -T git@github.com 2>&1 | head -5
+          
+      - name: Configure Git
+        run: |
+          git config --global user.name "lwelch44"
+          git config --global user.email "lihao574403035@gmail.com"
+          
+      - name: Test blog repository cloning
+        id: clone-test
+        run: |
+          echo "=== Testing blog repository cloning ==="
+          
+          # 尝试多种可能的路径
+          PATHS=(
+            "/home/runner/.free-server/repo"
+            "/freeServer/repo" 
+            "/home/runner/freeServer/repo"
+            "/tmp/freeServer/repo"
+          )
+          
+          BLOG_URI="git@github.com:lwelch44/lihao.github.io.git"
+          
+          for path in "\${PATHS[@]}"; do
+            echo "\\n--- Testing path: \$path ---"
+            
+            # 清理旧目录
+            rm -rf "\$path"
+            mkdir -p "\$path"
+            
+            echo "Attempting to clone blog repository..."
+            if git clone "\$BLOG_URI" "\$path" 2>&1; then
+              echo "✅ Successfully cloned to: \$path"
+              echo "Checking repository contents..."
+              cd "\$path"
+              echo "Files:"
+              find . -type f -name "*.md" -o -name "*.html" -o -name "*.yml" | head -10
+              echo "Git status:"
+              git status 2>/dev/null || echo "Cannot get git status"
+              echo "Latest commit:"
+              git log --oneline -3 2>/dev/null || echo "Cannot get git log"
+              
+              # 检查是否可以push
+              echo "Testing git push (dry-run)..."
+              git push --dry-run 2>&1 | head -5 || echo "Push test failed"
+              
+              # 标记成功
+              echo "clone_success=true" >> $GITHUB_OUTPUT
+              echo "clone_path=\$path" >> $GITHUB_OUTPUT
+              break
+            else
+              echo "❌ Failed to clone to: \$path"
+            fi
+          done
+          
+          if [ -z "\$(echo \${{ steps.clone-test.outputs.clone_success }})" ]; then
+            echo "❌ All clone attempts failed"
+            echo "clone_success=false" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Test FreeServer directories
+        run: |
+          echo "=== Testing FreeServer directory creation ==="
+          
+          # 创建FreeServer期望的所有目录
+          DIRS=(
+            "/home/runner/.free-server"
+            "/home/runner/.free-server/repo"
+            "/home/runner/.free-server/phantomJsPic"
+            "/home/runner/.free-server/resource"
+            "/freeServer"
+            "/freeServer/repo"
+            "/freeServer/phantomJsPic"
+            "/freeServer/resource"
+          )
+          
+          for dir in "\${DIRS[@]}"; do
+            echo "Creating directory: \$dir"
+            mkdir -p "\$dir"
+            chmod 755 "\$dir" 2>/dev/null || echo "Cannot chmod \$dir"
+          done
+          
+          # 检查权限
+          echo "\\nDirectory permissions:"
+          for dir in "\${DIRS[@]}"; do
+            if [ -d "\$dir" ]; then
+              echo "- \$dir: \$(ls -ld \$dir | awk '{print \$1, \$3, \$4}')"
+            else
+              echo "- \$dir: NOT CREATED"
+            fi
+          done
+          
+      - name: Test configuration file creation
+        run: |
+          echo "=== Testing configuration file creation ==="
+          
+          # 创建配置文件
+          cat > /home/runner/.free-server/application-config.yml << 'EOF'
+cloudServers:
+  -
+    username: "test-user"
+    password: "test-pass"
+    type: 0
+
+blogInfo:
+  uri: git@github.com:lwelch44/lihao.github.io.git
+  localPath: /home/runner/.free-server/repo
+  username: lwelch44
+
+phantomJs:
+  phantomJsExec:
+    picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+
+blogInitWaitCount: 10
+blogInitWaitTime: 1
+
+resourceTempFilePath: /home/runner/.free-server/resource
+EOF
+          
+          # 也在/freeServer路径创建
+          cat > /freeServer/application-config.yml << 'EOF'
+cloudServers:
+  -
+    username: "test-user"
+    password: "test-pass"
+    type: 0
+
+blogInfo:
+  uri: git@github.com:lwelch44/lihao.github.io.git
+  localPath: /freeServer/repo
+  username: lwelch44
+
+phantomJs:
+  phantomJsExec:
+    picPath: /freeServer/phantomJsPic/postpone.png
+
+blogInitWaitCount: 10
+blogInitWaitTime: 1
+
+resourceTempFilePath: /freeServer/resource
+EOF
+          
+          echo "Configuration files created:"
+          echo "1. /home/runner/.free-server/application-config.yml"
+          cat /home/runner/.free-server/application-config.yml
+          echo "\\n2. /freeServer/application-config.yml"
+          cat /freeServer/application-config.yml
+          
+      - name: Test Java execution
+        run: |
+          echo "=== Testing Java environment ==="
+          
+          # 检查Java
+          java -version 2>&1 || echo "Java not available"
+          
+          # 尝试运行简单的Java程序测试权限
+          cat > TestPermissions.java << 'EOF'
+public class TestPermissions {
+  public static void main(String[] args) {
+    System.out.println("Testing file system permissions...");
+    String[] paths = {
+      "/home/runner/.free-server",
+      "/freeServer",
+      System.getProperty("user.home")
+    };
+    for (String path : paths) {
+      java.io.File dir = new java.io.File(path);
+      System.out.println(path + ": exists=" + dir.exists() + ", canWrite=" + dir.canWrite());
+    }
+  }
+}
+EOF
+          
+          javac TestPermissions.java 2>&1 && java TestPermissions 2>&1 || echo "Java test failed"
+          
+      - name: Summary
+        run: |
+          echo "=== Test Summary ==="
+          echo "Blog clone success: \${{ steps.clone-test.outputs.clone_success || 'NOT TESTED' }}"
+          echo "Clone path: \${{ steps.clone-test.outputs.clone_path || 'N/A' }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. If clone succeeded, FreeServer should be able to access blog repository"
+          echo "2. Check that directories exist at both /home/runner/.free-server and /freeServer"
+          echo "3. Verify configuration files are correctly formatted"
+          echo "4. Ensure Java has write permissions to these directories"
