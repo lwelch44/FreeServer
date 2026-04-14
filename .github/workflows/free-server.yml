@@ -1,4 +1,4 @@
-name: Free Server Auto Postpone
+name: Free Server Auto Postpone (Fixed Blog)
 
 on:
   schedule:
@@ -20,12 +20,11 @@ jobs:
           java-version: '8'
           distribution: 'temurin'
 
-      - name: Setup SSH manually (bypass ssh-agent)
+      - name: Setup SSH manually
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
-          # 创建 SSH 目录
+          echo "=== Setting up SSH ==="
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           
@@ -36,7 +35,7 @@ jobs:
           # 生成公钥
           ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub 2>/dev/null || echo "Failed to generate public key"
           
-          # 创建 SSH config
+          # 创建SSH配置
           cat > ~/.ssh/config << EOF
           Host github.com
             HostName github.com
@@ -45,86 +44,104 @@ jobs:
             StrictHostKeyChecking no
           EOF
           
-          # 添加 GitHub 到 known_hosts
+          # 添加known_hosts
           ssh-keyscan github.com >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
           
           # 测试连接
           echo "Testing SSH connection..."
-          ssh -T git@github.com || echo "SSH test completed (exit code: $?)"
-          
-          # 如果 PAGES_REPO 存在，测试克隆
-          if [ -n "$PAGES_REPO" ]; then
-            echo "Testing clone of blog repo..."
-            rm -rf /tmp/test-repo
-            git clone git@github.com:$PAGES_REPO.git /tmp/test-repo || echo "Clone test completed (exit code: $?)"
-          fi
+          ssh -T git@github.com 2>&1 | head -3 || echo "SSH test completed"
 
       - name: Configure Git
         run: |
           git config --global user.name "lwelch44"
           git config --global user.email "lihao574403035@gmail.com"
 
-      - name: Create directories (multiple paths)
+      - name: Pre-clone blog repository (CRITICAL FIX)
+        id: pre-clone
         run: |
-          # 创建工作流使用的目录
+          echo "=== PRE-CLONING BLOG REPOSITORY ==="
+          echo "This step ensures the blog repository exists before FreeServer starts"
+          
+          BLOG_URI="git@github.com:lwelch44/lihao.github.io.git"
+          
+          # 创建所有可能的目录
           mkdir -p /home/runner/.free-server
-          mkdir -p /home/runner/.free-server/phantomJsPic
           mkdir -p /home/runner/.free-server/repo
+          mkdir -p /home/runner/.free-server/phantomJsPic
           mkdir -p /home/runner/.free-server/resource
           
-          # 也创建源代码中使用的目录（以防万一）
-          mkdir -p /freeServer
-          mkdir -p /freeServer/repo
-          mkdir -p /freeServer/phantomJsPic
-          mkdir -p /freeServer/resource
+          # 尝试创建/freeServer目录（可能需要sudo）
+          sudo mkdir -p /freeServer 2>/dev/null || mkdir -p /freeServer 2>/dev/null || echo "Warning: Cannot create /freeServer"
+          sudo mkdir -p /freeServer/repo 2>/dev/null || mkdir -p /freeServer/repo 2>/dev/null || echo "Warning: Cannot create /freeServer/repo"
           
-          echo "Created directories:"
-          echo "- /home/runner/.free-server/repo"
-          echo "- /freeServer/repo"
-          echo "- /home/runner/.free-server/phantomJsPic"
-          echo "- /home/runner/.free-server/resource"
+          # 设置权限
+          sudo chmod 777 /freeServer 2>/dev/null || chmod 755 /freeServer 2>/dev/null || echo "Warning: Cannot chmod /freeServer"
+          sudo chmod 777 /freeServer/repo 2>/dev/null || chmod 755 /freeServer/repo 2>/dev/null || echo "Warning: Cannot chmod /freeServer/repo"
+          
+          # 尝试克隆到两个位置
+          echo "Attempting to clone blog repository to /home/runner/.free-server/repo..."
+          if git clone "$BLOG_URI" /home/runner/.free-server/repo 2>&1; then
+            echo "✅ Successfully cloned to /home/runner/.free-server/repo"
+            echo "pre_clone_path=/home/runner/.free-server/repo" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to clone to /home/runner/.free-server/repo"
+            echo "Checking if directory exists anyway..."
+            if [ -d "/home/runner/.free-server/repo/.git" ]; then
+              echo "✅ Blog repo already exists at /home/runner/.free-server/repo"
+              echo "pre_clone_path=/home/runner/.free-server/repo" >> $GITHUB_OUTPUT
+            fi
+          fi
+          
+          echo "Attempting to clone blog repository to /freeServer/repo..."
+          if git clone "$BLOG_URI" /freeServer/repo 2>&1; then
+            echo "✅ Successfully cloned to /freeServer/repo"
+            echo "pre_clone_path=/freeServer/repo" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to clone to /freeServer/repo"
+            echo "Checking if directory exists anyway..."
+            if [ -d "/freeServer/repo/.git" ]; then
+              echo "✅ Blog repo already exists at /freeServer/repo"
+              echo "pre_clone_path=/freeServer/repo" >> $GITHUB_OUTPUT
+            fi
+          fi
+          
+          # 验证克隆结果
+          echo "\\n=== Verifying blog repositories ==="
+          for path in "/home/runner/.free-server/repo" "/freeServer/repo"; do
+            if [ -d "$path/.git" ]; then
+              echo "✅ Blog repo verified at: $path"
+              cd "$path"
+              echo "  Branch: $(git branch --show-current 2>/dev/null || echo 'unknown')"
+              echo "  Latest commit: $(git log --oneline -1 2>/dev/null || echo 'none')"
+              echo "  Remote: $(git remote -v 2>/dev/null | head -1 || echo 'none')"
+            else
+              echo "❌ No blog repo at: $path"
+            fi
+          done
 
-      - name: Debug environment variables
+      - name: Create configuration with correct paths
         env:
           CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
           CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
-          PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
-          echo "=== Debug Environment Variables ==="
-          echo "CLOUD_USERNAME: [${#CLOUD_USERNAME} chars]"
-          echo "CLOUD_PASSWORD: [${#CLOUD_PASSWORD} chars]"
-          echo "PAGES_REPO: $PAGES_REPO [${#PAGES_REPO} chars]"
+          echo "=== Creating configuration files ==="
           
-          if [ -z "$CLOUD_USERNAME" ]; then
-            echo "❌ WARNING: CLOUD_USERNAME is empty!"
+          # 确定使用哪个路径（优先使用/freeServer/repo如果存在）
+          BLOG_PATH="/home/runner/.free-server/repo"
+          if [ -d "/freeServer/repo/.git" ]; then
+            BLOG_PATH="/freeServer/repo"
+            echo "Using /freeServer/repo for blog path"
+          elif [ -d "/home/runner/.free-server/repo/.git" ]; then
+            BLOG_PATH="/home/runner/.free-server/repo"
+            echo "Using /home/runner/.free-server/repo for blog path"
           else
-            echo "✅ CLOUD_USERNAME is set"
+            echo "⚠️ Warning: No blog repository found, using default path"
           fi
           
-          if [ -z "$CLOUD_PASSWORD" ]; then
-            echo "❌ WARNING: CLOUD_PASSWORD is empty!"
-          else
-            echo "✅ CLOUD_PASSWORD is set"
-          fi
-          
-          if [ -z "$PAGES_REPO" ]; then
-            echo "⚠️  WARNING: PAGES_REPO is empty! Blog will be disabled."
-          else
-            echo "✅ PAGES_REPO is set: $PAGES_REPO"
-          fi
-
-      - name: Generate enhanced config with correct URI
-        env:
-          CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
-          CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
-          PAGES_REPO: ${{ secrets.PAGES_REPO }}
-        run: |
-          echo "=== Generating application-config.yml ==="
+          # 创建主配置文件
           mkdir -p /home/runner/.free-server
-          
-          # 根据源代码中的格式生成配置
-          cat > /home/runner/.free-server/application-config.yml << 'EOF'
+          cat > /home/runner/.free-server/application-config.yml << EOF
 cloudServers:
   -
     username: "${CLOUD_USERNAME}"
@@ -132,10 +149,8 @@ cloudServers:
     type: 0
 
 blogInfo:
-  # 使用正确的.git后缀格式
   uri: git@github.com:lwelch44/lihao.github.io.git
-  # 同时尝试两种路径
-  localPath: /home/runner/.free-server/repo
+  localPath: ${BLOG_PATH}
   username: lwelch44
 
 phantomJs:
@@ -148,13 +163,13 @@ blogInitWaitTime: 1
 resourceTempFilePath: /home/runner/.free-server/resource
 EOF
           
-          echo "Config generated at /home/runner/.free-server/application-config.yml"
+          echo "Main config created at /home/runner/.free-server/application-config.yml"
           echo "=== Config content ==="
           cat /home/runner/.free-server/application-config.yml
-          echo "=== End config ==="
           
-          # 也创建一份在源代码期望的路径
-          cat > /freeServer/application-config.yml << 'EOF'
+          # 如果/freeServer目录可写，也创建一份配置
+          if [ -w "/freeServer" ]; then
+            cat > /freeServer/application-config.yml << EOF
 cloudServers:
   -
     username: "${CLOUD_USERNAME}"
@@ -163,7 +178,7 @@ cloudServers:
 
 blogInfo:
   uri: git@github.com:lwelch44/lihao.github.io.git
-  localPath: /freeServer/repo
+  localPath: ${BLOG_PATH}
   username: lwelch44
 
 phantomJs:
@@ -175,8 +190,8 @@ blogInitWaitTime: 1
 
 resourceTempFilePath: /freeServer/resource
 EOF
-          
-          echo "Also created config at /freeServer/application-config.yml"
+            echo "\\nSecondary config created at /freeServer/application-config.yml"
+          fi
 
       - name: Download and build project
         run: |
@@ -186,124 +201,146 @@ EOF
           rm -rf temp-repo
           cd postpone
           chmod +x mvnw
-          echo "Building project..."
-          ./mvnw clean package -DskipTests 2>&1 | tail -50
-          echo "Build completed (check logs above)"
+          echo "Building project (this may take a minute)..."
+          ./mvnw clean package -DskipTests 2>&1 | tail -100
+          echo "Build completed"
 
-      - name: Check FreeServer structure
-        run: |
-          echo "=== Checking FreeServer structure ==="
-          echo "Current directory: $(pwd)"
-          echo "Postpone directory contents:"
-          ls -la postpone/
-          echo "JAR file:"
-          ls -la postpone/target/*.jar 2>/dev/null || echo "No JAR file found"
-          echo "Config files in resources:"
-          find postpone/src/main/resources -name "*.yml" -o -name "*.yaml" | xargs -I {} sh -c 'echo "=== {} ===" && head -20 {}'
-
-      - name: Run FreeServer with detailed logging
+      - name: Run FreeServer with forced blog initialization
         id: run-freeserver
         run: |
-          echo "=== Running FreeServer ==="
+          echo "=== Running FreeServer with pre-initialized blog ==="
           cd postpone
           
-          # 运行Java程序并捕获输出
-          echo "Starting FreeServer with config from: /home/runner/.free-server/application-config.yml"
           echo "Current directory: $(pwd)"
           echo "User home: $HOME"
+          echo "Blog path from config:"
+          grep "localPath:" /home/runner/.free-server/application-config.yml
           
-          # 运行Java程序，将输出保存到文件
-          java -Duser.home=/home/runner -jar target/postpone-2.0.jar 2>&1 | tee /tmp/freeserver-output.log
+          # 运行FreeServer并捕获详细输出
+          echo "Starting FreeServer..."
+          java -Duser.home=/home/runner -jar target/postpone-2.0.jar 2>&1 | tee /tmp/freeserver-detailed.log
           
           EXIT_CODE=$?
           echo "FreeServer exit code: $EXIT_CODE"
           
-          # 检查输出文件
-          echo "=== FreeServer output (last 100 lines) ==="
-          tail -100 /tmp/freeserver-output.log
+          # 分析输出
+          echo "\\n=== FreeServer output analysis ==="
+          echo "Total lines in log: $(wc -l < /tmp/freeserver-detailed.log)"
           
-          # 检查是否有博客相关的输出
-          echo "=== Checking for blog-related output ==="
-          grep -i "blog\|git\|repo\|commit\|push\|clone\|pull" /tmp/freeserver-output.log || echo "No blog-related output found"
+          # 查找博客相关输出
+          echo "\\n=== Blog-related messages ==="
+          grep -i -B2 -A2 "blog\|git\|repo\|clone\|pull\|push\|commit\|github" /tmp/freeserver-detailed.log || echo "No blog-related messages found"
           
-          # 保存退出代码供后续步骤使用
+          # 查找错误
+          echo "\\n=== Error messages ==="
+          grep -i "error\|fail\|exception\|cannot\|unable" /tmp/freeserver-detailed.log | head -20 || echo "No error messages found"
+          
+          # 保存退出代码
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
 
-      - name: Check FreeServer directories after run
+      - name: Verify blog repository after FreeServer
         run: |
-          echo "=== Checking FreeServer directories ==="
-          echo "Directory /home/runner/.free-server:"
-          ls -la /home/runner/.free-server/ 2>/dev/null || echo "Directory not found"
+          echo "=== Verifying blog repository after FreeServer run ==="
           
-          echo "Directory /freeServer:"
-          ls -la /freeServer/ 2>/dev/null || echo "Directory not found"
-          
-          echo "Blog repo directory check:"
-          if [ -d "/home/runner/.free-server/repo/.git" ]; then
-            echo "✅ Blog repo found at /home/runner/.free-server/repo/.git"
-            cd /home/runner/.free-server/repo
-            echo "Git status:"
-            git status 2>/dev/null || echo "Cannot get git status"
-            echo "Latest commits:"
-            git log --oneline -5 2>/dev/null || echo "No git history"
-          else
-            echo "❌ Blog repo NOT found at /home/runner/.free-server/repo/.git"
-          fi
-          
-          if [ -d "/freeServer/repo/.git" ]; then
-            echo "✅ Blog repo found at /freeServer/repo/.git"
-            cd /freeServer/repo
-            echo "Git status:"
-            git status 2>/dev/null || echo "Cannot get git status"
-          else
-            echo "❌ Blog repo NOT found at /freeServer/repo/.git"
-          fi
-
-      - name: Enhanced blog repository check
-        run: |
-          echo "=== Enhanced Blog Repository Check ==="
-          
-          # 检查可能的目录
-          POSSIBLE_PATHS="/home/runner/.free-server/repo /freeServer/repo /home/runner/freeServer/repo"
-          
-          for path in $POSSIBLE_PATHS; do
+          # 检查博客仓库是否被修改
+          for path in "/home/runner/.free-server/repo" "/freeServer/repo"; do
             if [ -d "$path/.git" ]; then
-              echo "✅ Found blog repo at: $path"
+              echo "\\n=== Checking blog repo at: $path ==="
               cd "$path"
-              echo "  Current branch: $(git branch --show-current 2>/dev/null || echo 'unknown')"
-              echo "  Latest commit: $(git log --oneline -1 2>/dev/null || echo 'none')"
-              echo "  Files in repo:"
-              find . -type f -name "*.md" -o -name "*.html" -o -name "*.yml" -o -name "*.yaml" | head -20
-              echo "  Git remote:"
-              git remote -v 2>/dev/null || echo "    No remote configured"
-            else
-              echo "❌ No blog repo at: $path"
+              echo "Git status:"
+              git status 2>/dev/null || echo "Cannot get git status"
+              echo "Recent commits:"
+              git log --oneline -10 2>/dev/null || echo "Cannot get git log"
+              echo "Uncommitted changes:"
+              git diff --name-only 2>/dev/null | head -10 || echo "No uncommitted changes or cannot check"
+              
+              # 检查是否有新文件
+              echo "\\nNew files (excluding .git):"
+              find . -type f -not -path "./.git/*" -name "*.md" -o -name "*.html" -o -name "*.yml" | head -20
             fi
           done
           
-          # 检查FreeServer输出中的博客相关日志
-          if [ -f "/tmp/freeserver-output.log" ]; then
-            echo "=== Blog-related logs from FreeServer ==="
-            grep -A5 -B5 -i "blog\|github\|git\|repo\|commit\|push\|clone" /tmp/freeserver-output.log || echo "No blog-related logs found"
+          # 检查FreeServer输出中是否有博客更新
+          if [ -f "/tmp/freeserver-detailed.log" ]; then
+            echo "\\n=== Checking for blog update indicators ==="
+            if grep -i "blog.*update\|post.*created\|article.*published\|commit.*success" /tmp/freeserver-detailed.log; then
+              echo "✅ Blog update detected in FreeServer logs"
+            else
+              echo "❌ No blog update detected in logs"
+            fi
           fi
 
-      - name: Send notification via PushPlus
+      - name: Push blog updates if any
+        id: push-updates
+        run: |
+          echo "=== Pushing blog updates if any ==="
+          
+          # 确定哪个仓库有更改
+          for path in "/home/runner/.free-server/repo" "/freeServer/repo"; do
+            if [ -d "$path/.git" ]; then
+              cd "$path"
+              if git status --porcelain 2>/dev/null | grep -q "."; then
+                echo "📝 Found uncommitted changes in $path"
+                echo "Changes:"
+                git status --porcelain 2>/dev/null
+                
+                # 添加所有文件
+                git add . 2>/dev/null
+                
+                # 提交
+                COMMIT_MSG="Auto-update from FreeServer $(date '+%Y-%m-%d %H:%M:%S')"
+                if git commit -m "$COMMIT_MSG" 2>/dev/null; then
+                  echo "✅ Committed changes: $COMMIT_MSG"
+                  
+                  # 推送
+                  if git push 2>/dev/null; then
+                    echo "✅ Successfully pushed to GitHub"
+                    echo "push_success=true" >> $GITHUB_OUTPUT
+                    echo "push_path=$path" >> $GITHUB_OUTPUT
+                  else
+                    echo "❌ Failed to push to GitHub"
+                  fi
+                else
+                  echo "❌ Failed to commit changes"
+                fi
+              else
+                echo "📭 No uncommitted changes in $path"
+              fi
+            fi
+          done
+          
+          if [ -z "\$(echo \${{ steps.push-updates.outputs.push_success }})" ]; then
+            echo "ℹ️  No blog updates to push"
+          fi
+
+      - name: Final verification
+        run: |
+          echo "=== FINAL VERIFICATION ==="
+          echo "Blog URL: https://lwelch44.github.io/lihao.github.io/"
+          echo ""
+          echo "Summary:"
+          echo "1. Blog repository pre-cloned: \${{ steps.pre-clone.outputs.pre_clone_path || 'NOT FOUND' }}"
+          echo "2. FreeServer exit code: \${{ steps.run-freeserver.outputs.exit_code || 'UNKNOWN' }}"
+          echo "3. Blog updates pushed: \${{ steps.push-updates.outputs.push_success || 'false' }}"
+          echo "4. Push path: \${{ steps.push-updates.outputs.push_path || 'N/A' }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Visit the blog URL to check if it's accessible"
+          echo "2. Wait 1-2 minutes for GitHub Pages to rebuild if updates were pushed"
+          echo "3. Check blog repository commits for new content"
+
+      - name: Send notification
         if: always()
         run: |
           STATUS="${{ job.status }}"
-          BLOG_UPDATED="false"
-          
-          # 检查博客是否更新
-          if [ -d "/home/runner/.free-server/repo/.git" ] || [ -d "/freeServer/repo/.git" ]; then
-            BLOG_UPDATED="true"
-          fi
+          BLOG_UPDATED="\${{ steps.push-updates.outputs.push_success || 'false' }}"
           
           if [ "$STATUS" = "success" ]; then
             if [ "$BLOG_UPDATED" = "true" ]; then
-              curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Success&content=✅ 服务器延期成功完成！✅ 博客已更新。"
+              curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=✅ FreeServer Success&content=✅ 服务器延期成功！✅ 博客已更新并推送。"
             else
-              curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Success&content=✅ 服务器延期成功完成！⚠️ 博客未更新（可能是首次运行或配置问题）。"
+              curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=✅ FreeServer Success&content=✅ 服务器延期成功！⚠️ 博客未更新（可能需要更多配置）。"
             fi
           else
-            curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Failed&content=❌ 服务器延期失败，请检查配置！Job status: $STATUS"
+            curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=❌ FreeServer Failed&content=❌ 服务器延期失败，请检查日志。Job status: $STATUS"
           fi
