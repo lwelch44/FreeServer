@@ -40,7 +40,7 @@ CLOUD_PASSWORD_ABEIYUN: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
 CLOUD_USERNAME_SANFENGYUN: ${{ secrets.CLOUD_USERNAME_SANFENGYUN }}
 CLOUD_PASSWORD_SANFENGYUN: ${{ secrets.CLOUD_PASSWORD_SANFENGYUN }}
 PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-PAGES_REPO: ${{ secrets.GITHUB_PAGES_REPO }}
+PAGES_REPO: ${{ secrets.PAGES_REPO }}
 run: |
 cat > /home/runner/.free-server/application-config.yml << EOF
 # 免费服务器地址 配置
@@ -60,7 +60,7 @@ fi)
 
 # 博客配置 GitHub 个人博客
 blogInfo:
-uri: git@github.com:$GITHUB_PAGES_REPO
+uri: git@github.com:$PAGES_REPO
 localPath: /home/runner/.free-server/repo
 username: lwelch44
 
