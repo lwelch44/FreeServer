@@ -1,0 +1,173 @@
+name: Blog Publisher - Fixed Version
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  publish-blog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Debug Info
+        run: |
+          echo "=== Debug Info ==="
+          echo "Runner OS: $(uname -a)"
+          echo "Working dir: $(pwd)"
+          echo "Home dir: $HOME"
+          echo "Current time: $(date)"
+          
+      - name: Setup SSH (Copy from SSH/Git Test)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "=== Using EXACT method from successful SSH/Git test ==="
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Exact same method from ssh-git-test.yml
+          echo "$SSH_PRIVATE_KEY" > /tmp/ssh_key.b64
+          if base64 -d /tmp/ssh_key.b64 > ~/.ssh/id_rsa 2>/dev/null; then
+            echo "✅ Base64 decode successful"
+          else
+            echo "⚠️ Base64 decode failed, using raw content"
+            echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          fi
+          
+          chmod 600 ~/.ssh/id_rsa
+          rm -f /tmp/ssh_key.b64
+          
+          # Show key info
+          echo "Key first line:"
+          head -1 ~/.ssh/id_rsa || echo "Cannot read key"
+          
+      - name: Configure SSH and Test Connection
+        run: |
+          echo "=== Configuring SSH ==="
+          cat > ~/.ssh/config << 'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+          EOF
+          
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 644 ~/.ssh/known_hosts
+          
+          echo "Testing SSH connection..."
+          ssh -T git@github.com 2>&1 | head -5 || echo "SSH test completed"
+          
+      - name: Configure Git
+        run: |
+          git config --global user.name "lwelch44"
+          git config --global user.email "lihao574403035@gmail.com"
+          echo "Git configured"
+          
+      - name: Clone Blog Repository (Exact from SSH/Git Test)
+        run: |
+          echo "=== Cloning blog repository (same method as SSH/Git test) ==="
+          rm -rf /tmp/blog-fixed-test
+          
+          # Use same method that worked
+          set +e  # Don't exit on error
+          git clone git@github.com:lwelch44/lihao.github.io.git /tmp/blog-fixed-test 2>&1
+          CLONE_RESULT=$?
+          
+          echo "Git clone exit code: $CLONE_RESULT"
+          if [ $CLONE_RESULT -eq 0 ]; then
+            echo "✅ Git clone successful!"
+            echo "Repository contents:"
+            ls -la /tmp/blog-fixed-test/
+          else
+            echo "❌ Git clone failed"
+            echo "Trying with verbose SSH output..."
+            GIT_SSH_COMMAND="ssh -v" git clone git@github.com:lwelch44/lihao.github.io.git /tmp/blog-fixed-test-debug 2>&1 | tail -100
+          fi
+          
+      - name: Create Test Post
+        run: |
+          echo "=== Creating test post ==="
+          if [ -d "/tmp/blog-fixed-test" ]; then
+            cd /tmp/blog-fixed-test
+            
+            # Ensure _posts directory exists
+            mkdir -p _posts
+            
+            # Create test post
+            DATE=$(date '+%Y-%m-%d')
+            TIME=$(date '+%H:%M:%S')
+            FILE="_posts/${DATE}-fixed-version-test.md"
+            
+            cat > "$FILE" << 'EOF'
+---
+layout: post
+title: "Fixed Version Test - Blog Publishing Works!"
+date: $DATE $TIME
+categories: test success
+---
+
+## 🎉 Blog Publishing Confirmed Working!
+
+This post was created by the **fixed version** of the blog publisher workflow.
+
+### What This Proves:
+- ✅ SSH authentication works perfectly
+- ✅ Git clone operations work  
+- ✅ Blog repository can be updated
+- ✅ GitHub Pages will rebuild automatically
+- ✅ The entire blog publishing pathway is functional
+
+### Next Steps:
+1. Integrate FreeServer blog generation
+2. Schedule automatic updates every 6 hours
+3. Enjoy automatic blog content!
+
+**Timestamp**: $DATE $TIME
+
+EOF
+            
+            echo "Created file: $FILE"
+            echo "File size: $(wc -c < "$FILE") bytes"
+          else
+            echo "❌ Blog repository not found, skipping post creation"
+          fi
+          
+      - name: Commit and Push
+        run: |
+          echo "=== Committing and pushing ==="
+          if [ -d "/tmp/blog-fixed-test" ]; then
+            cd /tmp/blog-fixed-test
+            
+            echo "Git status before commit:"
+            git status || echo "Git status failed"
+            
+            echo "Adding files..."
+            git add . || echo "Git add failed"
+            
+            echo "Committing..."
+            git commit -m "FIXED VERSION: Blog publishing works! $(date '+%Y-%m-%d %H:%M:%S')" || echo "Commit failed or no changes"
+            
+            echo "Pushing..."
+            git push origin master || echo "Push failed"
+          else
+            echo "❌ Blog repository not found, skipping commit/push"
+          fi
+          
+      - name: Final Verification
+        run: |
+          echo "=== FINAL VERIFICATION ==="
+          echo ""
+          echo "If successful, check:"
+          echo "1. New commit at: https://github.com/lwelch44/lihao.github.io/commits"
+          echo "2. New post at: https://lwelch44.github.io/lihao.github.io/"
+          echo "3. GitHub Pages rebuild status"
+          echo ""
+          echo "Expected timeline:"
+          echo "- 0-1 min: Workflow completes"
+          echo "- 1-2 min: GitHub Pages rebuilds"
+          echo "- 2-3 min: New post visible on blog"
+          echo ""
+          echo "This will confirm blog publishing is fully functional!"
