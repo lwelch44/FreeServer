@@ -20,19 +20,6 @@ jobs:
           java-version: '8'
           distribution: 'temurin'
 
-      - name: Convert SSH key to PEM format
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        run: |
-          echo "$SSH_PRIVATE_KEY" > /tmp/private_key
-          ssh-keygen -p -m PEM -f /tmp/private_key -P "" -N ""
-          echo "Converted SSH key to PEM format"
-
-      - name: Setup SSH Key for GitHub Pages
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
       - name: Configure Git
         run: |
           git config --global user.name "lwelch44"
@@ -48,22 +35,39 @@ jobs:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
-          cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
-          cloudServers:
-            - username: "$CLOUD_USERNAME"
-              password: "$CLOUD_PASSWORD"
-              type: 0
-          blogInfo:
-            uri: git@github.com:$PAGES_REPO
-            localPath: /home/runner/.free-server/repo
-            username: lwelch44
-          phantomJs:
-            phantomJsExec:
-              picPath: /home/runner/.free-server/phantomJsPic/postpone.png
-          blogInitWaitCount: 10
-          blogInitWaitTime: 1
-          resourceTempFilePath: /home/runner/.free-server/resource
-          ENDOFYAML
+          # 如果没有 PAGES_REPO，则不配置博客（跳过 SSH）
+          if [ -z "$PAGES_REPO" ]; then
+            cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
+            cloudServers:
+              - username: "$CLOUD_USERNAME"
+                password: "$CLOUD_PASSWORD"
+                type: 0
+            blogInfo: {}
+            phantomJs:
+              phantomJsExec:
+                picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+            blogInitWaitCount: 0
+            blogInitWaitTime: 0
+            resourceTempFilePath: /home/runner/.free-server/resource
+            ENDOFYAML
+          else
+            cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
+            cloudServers:
+              - username: "$CLOUD_USERNAME"
+                password: "$CLOUD_PASSWORD"
+                type: 0
+            blogInfo:
+              uri: git@github.com:$PAGES_REPO
+              localPath: /home/runner/.free-server/repo
+              username: lwelch44
+            phantomJs:
+              phantomJsExec:
+                picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+            blogInitWaitCount: 10
+            blogInitWaitTime: 1
+            resourceTempFilePath: /home/runner/.free-server/resource
+            ENDOFYAML
+          fi
 
       - name: Create required directories
         run: |
@@ -78,7 +82,7 @@ jobs:
           rm -rf temp-repo
           cd postpone
           chmod +x mvnw
-          ./mvnw clean package -DskipTests || echo "Build may have warnings but continuing"
+          ./mvnw clean package -DskipTests || echo "Build may have warnings"
 
       - name: Run FreeServer
         run: |
