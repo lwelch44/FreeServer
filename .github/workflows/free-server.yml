@@ -72,46 +72,58 @@ jobs:
           mkdir -p /home/runner/.free-server/repo
           mkdir -p /home/runner/.free-server/resource
 
-      - name: Generate config with blog enabled
+      - name: Debug environment variables
         env:
           CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
           CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
           PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
-          if [ -z "$PAGES_REPO" ]; then
-            # 没有 PAGES_REPO，禁用博客
-            cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
-            cloudServers:
-              - username: "$CLOUD_USERNAME"
-                password: "$CLOUD_PASSWORD"
-                type: 0
-            blogInfo: {}
-            phantomJs:
-              phantomJsExec:
-                picPath: /home/runner/.free-server/phantomJsPic/postpone.png
-            blogInitWaitCount: 0
-            blogInitWaitTime: 0
-            resourceTempFilePath: /home/runner/.free-server/resource
-            ENDOFYAML
-          else
-            # 启用博客功能
-            cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
-            cloudServers:
-              - username: "$CLOUD_USERNAME"
-                password: "$CLOUD_PASSWORD"
-                type: 0
-            blogInfo:
-              uri: git@github.com:$PAGES_REPO
-              localPath: /home/runner/.free-server/repo
-              username: lwelch44
-            phantomJs:
-              phantomJsExec:
-                picPath: /home/runner/.free-server/phantomJsPic/postpone.png
-            blogInitWaitCount: 10
-            blogInitWaitTime: 1
-            resourceTempFilePath: /home/runner/.free-server/resource
-            ENDOFYAML
+          echo "Debug info:"
+          echo "CLOUD_USERNAME length: ${#CLOUD_USERNAME}"
+          echo "CLOUD_PASSWORD length: ${#CLOUD_PASSWORD}"
+          echo "PAGES_REPO: $PAGES_REPO (length: ${#PAGES_REPO})"
+          
+          # 检查环境变量是否设置
+          if [ -z "$CLOUD_USERNAME" ]; then
+            echo "WARNING: CLOUD_USERNAME is empty!"
           fi
+          if [ -z "$CLOUD_PASSWORD" ]; then
+            echo "WARNING: CLOUD_PASSWORD is empty!"
+          fi
+          if [ -z "$PAGES_REPO" ]; then
+            echo "WARNING: PAGES_REPO is empty! Blog will be disabled."
+          fi
+
+      - name: Generate simplified config
+        env:
+          CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
+          CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
+          PAGES_REPO: ${{ secrets.PAGES_REPO }}
+        run: |
+          # 创建基本配置目录
+          mkdir -p /home/runner/.free-server
+          
+          # 简单直接的配置生成
+          cat > /home/runner/.free-server/application-config.yml << EOF
+          cloudServers:
+            - username: "${CLOUD_USERNAME}"
+              password: "${CLOUD_PASSWORD}"
+              type: 0
+          blogInfo:
+            uri: git@github.com:lwelch44/lihao.github.io
+            localPath: /home/runner/.free-server/repo
+            username: lwelch44
+          phantomJs:
+            phantomJsExec:
+              picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+          blogInitWaitCount: 10
+          blogInitWaitTime: 1
+          resourceTempFilePath: /home/runner/.free-server/resource
+          EOF
+          
+          echo "Config generated at /home/runner/.free-server/application-config.yml"
+          echo "First few lines:"
+          head -10 /home/runner/.free-server/application-config.yml
 
       - name: Download and build project
         run: |
@@ -128,22 +140,18 @@ jobs:
           java -Duser.home=/home/runner -jar target/postpone-2.0.jar || echo "Execution finished"
 
       - name: Check if blog was updated
-        env:
-          PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
-          if [ -n "$PAGES_REPO" ]; then
-            echo "Checking blog repo updates..."
-            if [ -d "/home/runner/.free-server/repo/.git" ]; then
-              cd /home/runner/.free-server/repo
-              echo "Latest commits:"
-              git log --oneline -3 2>/dev/null || echo "No git history"
-              
-              # 检查是否有新文件
-              echo -e "\nFiles in repo:"
-              find . -type f -name "*.md" -o -name "*.html" | head -10
-            else
-              echo "Blog repo directory not found"
-            fi
+          echo "Checking blog repo..."
+          if [ -d "/home/runner/.free-server/repo/.git" ]; then
+            cd /home/runner/.free-server/repo
+            echo "Latest commits:"
+            git log --oneline -5 2>/dev/null || echo "No git history"
+            
+            # 列出文件
+            echo -e "\nFiles in repo:"
+            find . -type f -name "*.md" -o -name "*.html" | head -10
+          else
+            echo "Blog repo directory not found"
           fi
 
       - name: Send notification via PushPlus
