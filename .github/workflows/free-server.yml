@@ -1,0 +1,114 @@
+name: Free Server Auto Postpone
+
+on:
+# 定时触发（每6小时运行一次，避免错过延期时间）
+schedule:
+- cron: '0 */6 * * *'
+# 手动触发（用于测试和紧急延期）
+workflow_dispatch:
+
+jobs:
+postpone:
+runs-on: ubuntu-latest
+timeout-minutes: 30
+
+steps:
+- name: Checkout code
+uses: actions/checkout@v4
+
+- name: Setup Java 8
+uses: actions/setup-java@v4
+with:
+java-version: '8'
+distribution: 'temurin'
+
+- name: Setup SSH Key for GitHub Pages
+uses: webfactory/ssh-agent@v0.9.0
+with:
+ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+- name: Configure Git
+run: |
+git config --global user.name "lwelch44"
+git config --global user.email "lihao574403035@gmail.com"
+
+- name: Create configuration directory
+run: mkdir -p /home/runner/.free-server
+
+- name: Generate application-config.yml from secrets
+env:
+CLOUD_USERNAME_ABEIYUN: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
+CLOUD_PASSWORD_ABEIYUN: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
+CLOUD_USERNAME_SANFENGYUN: ${{ secrets.CLOUD_USERNAME_SANFENGYUN }}
+CLOUD_PASSWORD_SANFENGYUN: ${{ secrets.CLOUD_PASSWORD_SANFENGYUN }}
+EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+EMAIL_RECEIVE: ${{ secrets.EMAIL_RECEIVE }}
+GITHUB_PAGES_REPO: ${{ secrets.GITHUB_PAGES_REPO }}
+run: |
+cat > /home/runner/.free-server/application-config.yml << EOF
+# 免费服务器地址 配置
+cloudServers:
+$(if [ -n "$CLOUD_USERNAME_ABEIYUN" ] && [ -n "$CLOUD_PASSWORD_ABEIYUN" ]; then
+echo " -"
+echo " username: $CLOUD_USERNAME_ABEIYUN"
+echo " password: $CLOUD_PASSWORD_ABEIYUN"
+echo " type: 0"
+fi)
+$(if [ -n "$CLOUD_USERNAME_SANFENGYUN" ] && [ -n "$CLOUD_PASSWORD_SANFENGYUN" ]; then
+echo " -"
+echo " username: $CLOUD_USERNAME_SANFENGYUN"
+echo " password: $CLOUD_PASSWORD_SANFENGYUN"
+echo " type: 1"
+fi)
+
+# 邮箱配置
+mailInfo:
+serverHost: smtp.qq.com
+serverPort: 465
+username: $EMAIL_USERNAME
+password: $EMAIL_PASSWORD
+receiveUser: $EMAIL_RECEIVE
+
+# 博客配置 GitHub 个人博客
+blogInfo:
+uri: git@github.com:$GITHUB_PAGES_REPO
+localPath: /home/runner/.free-server/repo
+username: lwelch44
+
+# PhantomJs 配置项
+phantomJs:
+phantomJsExec:
+picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+
+# 系统配置
+blogInitWaitCount: 10
+blogInitWaitTime: 1
+resourceTempFilePath: /home/runner/.free-server/resource
+EOF
+
+- name: Create required directories
+run: |
+mkdir -p /home/runner/.free-server/phantomJsPic
+mkdir -p /home/runner/.free-server/repo
+mkdir -p /home/runner/.free-server/resource
+
+- name: Download and build project
+run: |
+git clone https://github.com/lwelch44/FreeServer.git temp-repo
+cp -r temp-repo/postpone .
+rm -rf temp-repo
+cd postpone
+./mvnw clean package -DskipTests
+
+- name: Run FreeServer
+run: |
+cd postpone
+java -Duser.home=/home/runner -jar target/postpone-2.0.jar
+
+- name: Upload logs if failed
+if: failure()
+uses: actions/upload-artifact@v4
+with:
+name: logs
+path: postpone/log.log
