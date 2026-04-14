@@ -1,0 +1,96 @@
+name: Free Server Auto Postpone
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  postpone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 8
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'temurin'
+
+      - name: Setup SSH Key for GitHub Pages
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "lwelch44"
+          git config --global user.email "lihao574403035@gmail.com"
+
+      - name: Create configuration directory
+        run: mkdir -p /home/runner/.free-server
+
+      - name: Generate application-config.yml
+        env:
+          CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
+          CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PAGES_REPO: ${{ secrets.PAGES_REPO }}
+        run: |
+          cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
+          cloudServers:
+            - username: "$CLOUD_USERNAME"
+              password: "$CLOUD_PASSWORD"
+              type: 0
+          blogInfo:
+            uri: git@github.com:$PAGES_REPO
+            localPath: /home/runner/.free-server/repo
+            username: lwelch44
+          phantomJs:
+            phantomJsExec:
+              picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+          blogInitWaitCount: 10
+          blogInitWaitTime: 1
+          resourceTempFilePath: /home/runner/.free-server/resource
+          ENDOFYAML
+
+      - name: Create required directories
+        run: |
+          mkdir -p /home/runner/.free-server/phantomJsPic
+          mkdir -p /home/runner/.free-server/repo
+          mkdir -p /home/runner/.free-server/resource
+
+      - name: Download and build project
+        run: |
+          git clone https://github.com/lwelch44/FreeServer.git temp-repo
+          cp -r temp-repo/postpone .
+          rm -rf temp-repo
+          cd postpone
+          chmod +x mvnw
+          ./mvnw clean package -DskipTests
+
+      - name: Run FreeServer
+        run: |
+          cd postpone
+          java -Duser.home=/home/runner -jar target/postpone-2.0.jar
+
+      - name: Send notification via PushPlus
+        if: always()
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            curl -s -X POST "https://www.pushplus.plus/send?token=$PUSHPLUS_TOKEN&title=FreeServer Success&content=服务器延期成功完成！"
+          else
+            curl -s -X POST "https://www.pushplus.plus/send?token=$PUSHPLUS_TOKEN&title=FreeServer Failed&content=服务器延期失败！"
+          fi
+
+      - name: Upload logs if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: postpone/log.log
