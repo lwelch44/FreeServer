@@ -1,6 +1,9 @@
 name: Free Server Auto Postpone
 
 on:
+# 手动触发
+workflow_dispatch:
+
 # 定时触发（每6小时运行一次，避免错过延期时间）
 schedule:
 - cron: '0 */6 * * *'
