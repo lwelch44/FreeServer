@@ -1,0 +1,131 @@
+name: Minimal Blog Test v2
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  test-blog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Debug Info
+        run: |
+          echo "=== DEBUG INFO ==="
+          echo "Runner OS: $(uname -a)"
+          echo "Working dir: $(pwd)"
+          echo "Home dir: $HOME"
+          ls -la
+          
+      - name: Setup SSH (Simple)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "Setting up SSH..."
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Write private key
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/key.b64
+          base64 -d ~/.ssh/key.b64 > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          rm ~/.ssh/key.b64
+          
+          # Generate public key
+          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub 2>/dev/null || echo "Could not generate public key"
+          
+          # Create config
+          cat > ~/.ssh/config << 'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+          EOF
+          
+          # Add known hosts
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 644 ~/.ssh/known_hosts
+          
+          echo "SSH files:"
+          ls -la ~/.ssh/
+          echo "Public key (first 100 chars):"
+          cat ~/.ssh/id_rsa.pub | head -c 100 || echo "No public key"
+          
+      - name: Test SSH Connection
+        run: |
+          echo "Testing SSH connection to GitHub..."
+          ssh -T git@github.com 2>&1 | head -5 || echo "SSH test completed"
+          
+      - name: Configure Git
+        run: |
+          git config --global user.name "lwelch44"
+          git config --global user.email "lihao574403035@gmail.com"
+          echo "Git configured"
+          
+      - name: Test Git Clone
+        run: |
+          echo "Testing git clone..."
+          rm -rf /tmp/blog-test-v2
+          git clone git@github.com:lwelch44/lihao.github.io.git /tmp/blog-test-v2
+          
+          echo "Clone result:"
+          ls -la /tmp/blog-test-v2/
+          echo "Git status:"
+          cd /tmp/blog-test-v2 && git status
+          
+      - name: Create Test Structure
+        run: |
+          echo "Creating test structure..."
+          cd /tmp/blog-test-v2
+          
+          # Ensure _posts directory exists
+          mkdir -p _posts
+          
+          # Create test post
+          DATE=$(date '+%Y-%m-%d')
+          FILE="_posts/${DATE}-test-v2.md"
+          
+          cat > "$FILE" << 'EOF'
+---
+layout: post
+title: "Test Post v2 from GitHub Actions"
+date: $DATE
+categories: test
+---
+
+## Test Successful!
+
+This post was created by Minimal Blog Test v2 workflow.
+
+- ✅ SSH authentication works
+- ✅ Git clone works  
+- ✅ Directory structure works
+- ✅ File creation works
+
+**Timestamp**: $(date '+%Y-%m-%d %H:%M:%S')
+
+EOF
+          
+          echo "Created file: $FILE"
+          ls -la _posts/
+          cat "$FILE"
+          
+      - name: Commit and Push
+        run: |
+          echo "Committing and pushing..."
+          cd /tmp/blog-test-v2
+          
+          git add .
+          git status
+          git commit -m "Test v2: Auto-post $(date '+%Y-%m-%d %H:%M:%S')" || echo "Commit failed or no changes"
+          git push origin master || echo "Push failed"
+          
+      - name: Final Check
+        run: |
+          echo "=== TEST COMPLETE ==="
+          echo "Check blog: https://lwelch44.github.io/lihao.github.io/"
+          echo "Check commits: https://github.com/lwelch44/lihao.github.io/commits"
+          echo "If successful, new post should appear in 1-2 minutes."
