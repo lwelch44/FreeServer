@@ -1,0 +1,128 @@
+name: SSH and Git Test
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  test-ssh-git:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Debug Environment
+        run: |
+          echo "=== Environment Info ==="
+          echo "Runner OS: $(uname -a)"
+          echo "Working dir: $(pwd)"
+          echo "Home dir: $HOME"
+          echo "SSH_PRIVATE_KEY length: ${#SSH_PRIVATE_KEY}"
+          echo "First 100 chars of SSH_PRIVATE_KEY:"
+          echo "$SSH_PRIVATE_KEY" | head -c 100
+          echo ""
+          echo "=== Testing base64 decode ==="
+          echo "$SSH_PRIVATE_KEY" | base64 -d 2>&1 | head -c 200 || echo "Base64 decode failed"
+          
+      - name: Setup SSH - Method 1 (Base64 decode)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "=== Method 1: Base64 decode ==="
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Try base64 decode
+          echo "$SSH_PRIVATE_KEY" > /tmp/ssh_key.b64
+          if base64 -d /tmp/ssh_key.b64 > ~/.ssh/id_rsa 2>/dev/null; then
+            echo "✅ Base64 decode successful"
+          else
+            echo "❌ Base64 decode failed, using raw content"
+            echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          fi
+          
+          chmod 600 ~/.ssh/id_rsa
+          rm -f /tmp/ssh_key.b64
+          
+          # Show key info
+          echo "Key type (first line):"
+          head -1 ~/.ssh/id_rsa || echo "Cannot read key"
+          echo "Key length:"
+          wc -c ~/.ssh/id_rsa || echo "Cannot get key length"
+          
+      - name: Setup SSH Config
+        run: |
+          echo "=== Setting up SSH config ==="
+          cat > ~/.ssh/config << 'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+          EOF
+          
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 644 ~/.ssh/known_hosts
+          
+          echo "SSH directory contents:"
+          ls -la ~/.ssh/
+          
+      - name: Test SSH Connection
+        run: |
+          echo "=== Testing SSH connection ==="
+          echo "Trying ssh -T git@github.com..."
+          ssh -T git@github.com 2>&1 | head -20 || echo "SSH test completed"
+          
+      - name: Test Git Clone - Simple
+        run: |
+          echo "=== Testing Git clone (simple) ==="
+          rm -rf /tmp/test-clone
+          set +e  # Don't exit on error
+          git clone git@github.com:lwelch44/lihao.github.io.git /tmp/test-clone 2>&1
+          CLONE_RESULT=$?
+          
+          echo "Git clone exit code: $CLONE_RESULT"
+          if [ $CLONE_RESULT -eq 0 ]; then
+            echo "✅ Git clone successful!"
+            ls -la /tmp/test-clone/
+          else
+            echo "❌ Git clone failed"
+            echo "Trying with verbose output..."
+            GIT_SSH_COMMAND="ssh -v" git clone git@github.com:lwelch44/lihao.github.io.git /tmp/test-clone-debug 2>&1 | tail -50
+          fi
+          
+      - name: Check Key Format
+        run: |
+          echo "=== Checking SSH key format ==="
+          if [ -f ~/.ssh/id_rsa ]; then
+            echo "Key file exists"
+            echo "First few lines:"
+            head -5 ~/.ssh/id_rsa
+            
+            # Check if it looks like a private key
+            if grep -q "BEGIN.*PRIVATE KEY" ~/.ssh/id_rsa; then
+              echo "✅ Key contains 'BEGIN PRIVATE KEY' marker"
+            else
+              echo "❌ Key does not contain 'BEGIN PRIVATE KEY' marker"
+              echo "Key might be in wrong format"
+            fi
+            
+            # Try to generate public key
+            echo "Trying to generate public key..."
+            ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub 2>&1 || echo "Cannot generate public key from this private key"
+          fi
+          
+      - name: Final Report
+        run: |
+          echo "=== TEST COMPLETE ==="
+          echo "Check the logs above to see where it failed."
+          echo ""
+          echo "Possible issues:"
+          echo "1. SSH key not in correct format (should start with '-----BEGIN OPENSSH PRIVATE KEY-----')"
+          echo "2. Key not added to GitHub account properly"
+          echo "3. Key permissions wrong on GitHub"
+          echo ""
+          echo "Next steps:"
+          echo "1. Check SSH key format in GitHub Secrets"
+          echo "2. Verify key is added to GitHub account with correct permissions"
+          echo "3. Try regenerating SSH key"
