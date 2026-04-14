@@ -1,0 +1,87 @@
+name: Debug FreeServer Blog
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: List files
+        run: |
+          echo '=== Current directory ==='
+          pwd
+          ls -la
+          echo ''
+          echo '=== Workflow directory ==='
+          ls -la .github/workflows/ || echo 'No workflows directory'
+          
+      - name: Test SSH setup
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo '=== Testing SSH key ==='
+          echo 'Key length: '${#SSH_PRIVATE_KEY}' chars'
+          if [ -n "$SSH_PRIVATE_KEY" ]; then
+            echo '✅ SSH key is set'
+            # Try to decode
+            echo "$SSH_PRIVATE_KEY" | base64 -d 2>/dev/null | wc -c | xargs echo 'Decoded bytes:'
+          else
+            echo '❌ SSH key is empty!'
+          fi
+          
+      - name: Test secrets
+        env:
+          CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
+          CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
+        run: |
+          echo '=== Checking secrets ==='
+          echo 'CLOUD_USERNAME length: '${#CLOUD_USERNAME}
+          echo 'CLOUD_PASSWORD length: '${#CLOUD_PASSWORD}
+          
+      - name: Test Git clone
+        run: |
+          echo '=== Testing Git operations ==='
+          git clone https://github.com/lwelch44/FreeServer.git test-clone 2>&1 | head -20 || echo 'Clone test completed'
+          
+      - name: Test Java
+        run: |
+          echo '=== Testing Java environment ==='
+          java -version 2>&1 || echo 'Java not installed'
+          
+      - name: Check FreeServer project
+        run: |
+          echo '=== Checking FreeServer project ==='
+          if [ -d "postpone" ]; then
+            echo '✅ postpone directory exists'
+            find postpone -name "*.java" -o -name "pom.xml" -o -name "mvnw" | head -10
+          else
+            echo '❌ FreeServer project not found in postpone/'
+            echo 'Looking for FreeServer directory...'
+            find . -type d -name "postpone" 2>/dev/null | head -5
+          fi
+          
+      - name: Create test directories
+        run: |
+          echo '=== Creating test directories ==='
+          mkdir -p /home/runner/.free-server/repo
+          mkdir -p /freeServer/repo
+          echo 'Directories created'
+          ls -ld /home/runner/.free-server /freeServer 2>/dev/null || echo 'Cannot list directories'
+          
+      - name: Final report
+        run: |
+          echo '=== DEBUG REPORT ==='
+          echo '1. Workflow file exists: ✅'
+          echo '2. SSH key status: '$(if [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ]; then echo '✅ SET'; else echo '❌ MISSING'; fi)
+          echo '3. Cloud credentials: '$(if [ -n "${{ secrets.CLOUD_USERNAME_ABEIYUN }}" ]; then echo '✅ SET'; else echo '❌ MISSING'; fi)
+          echo '4. Java available: '$(which java >/dev/null 2>&1 && echo '✅' || echo '❌')
+          echo '5. Git available: '$(which git >/dev/null 2>&1 && echo '✅' || echo '❌')
+          echo ''
+          echo 'Next: Check the logs above for specific errors.'
