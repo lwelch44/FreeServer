@@ -20,10 +20,34 @@ jobs:
           java-version: '8'
           distribution: 'temurin'
 
+      - name: Convert OpenSSH key to PEM
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          # 保存 OpenSSH 密钥到文件
+          echo "$SSH_PRIVATE_KEY" | base64 -d > /tmp/private_key
+          
+          # 检查文件内容
+          echo "Key type:"
+          head -c 20 /tmp/private_key | xxd | head -5
+          
+          # 尝试生成 PEM 格式的密钥对
+          ssh-keygen -f /tmp/private_key -y > /tmp/public_key 2>/dev/null || echo "Failed to extract public key"
+          
+          # 直接尝试使用原始密钥（可能可以工作）
+          echo "Using original OpenSSH key with ssh-agent"
+
+      - name: Setup SSH Key for GitHub Pages
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
       - name: Configure Git
         run: |
           git config --global user.name "lwelch44"
           git config --global user.email "lihao574403035@gmail.com"
+          # 添加 GitHub 到 known_hosts
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       - name: Create directories
         run: |
@@ -32,22 +56,58 @@ jobs:
           mkdir -p /home/runner/.free-server/repo
           mkdir -p /home/runner/.free-server/resource
 
-      - name: Generate config
+      - name: Generate config with blog enabled
         env:
           CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME_ABEIYUN }}
           CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
+          PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
-          echo "cloudServers:" > /home/runner/.free-server/application-config.yml
-          echo "  - username: \"$CLOUD_USERNAME\"" >> /home/runner/.free-server/application-config.yml
-          echo "    password: \"$CLOUD_PASSWORD\"" >> /home/runner/.free-server/application-config.yml
-          echo "    type: 0" >> /home/runner/.free-server/application-config.yml
-          echo "blogInfo: {}" >> /home/runner/.free-server/application-config.yml
-          echo "phantomJs:" >> /home/runner/.free-server/application-config.yml
-          echo "  phantomJsExec:" >> /home/runner/.free-server/application-config.yml
-          echo "    picPath: /home/runner/.free-server/phantomJsPic/postpone.png" >> /home/runner/.free-server/application-config.yml
-          echo "blogInitWaitCount: 0" >> /home/runner/.free-server/application-config.yml
-          echo "blogInitWaitTime: 0" >> /home/runner/.free-server/application-config.yml
-          echo "resourceTempFilePath: /home/runner/.free-server/resource" >> /home/runner/.free-server/application-config.yml
+          if [ -z "$PAGES_REPO" ]; then
+            # 没有 PAGES_REPO，禁用博客
+            cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
+            cloudServers:
+              - username: "$CLOUD_USERNAME"
+                password: "$CLOUD_PASSWORD"
+                type: 0
+            blogInfo: {}
+            phantomJs:
+              phantomJsExec:
+                picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+            blogInitWaitCount: 0
+            blogInitWaitTime: 0
+            resourceTempFilePath: /home/runner/.free-server/resource
+            ENDOFYAML
+          else
+            # 启用博客功能
+            cat > /home/runner/.free-server/application-config.yml << 'ENDOFYAML'
+            cloudServers:
+              - username: "$CLOUD_USERNAME"
+                password: "$CLOUD_PASSWORD"
+                type: 0
+            blogInfo:
+              uri: git@github.com:$PAGES_REPO
+              localPath: /home/runner/.free-server/repo
+              username: lwelch44
+            phantomJs:
+              phantomJsExec:
+                picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+            blogInitWaitCount: 10
+            blogInitWaitTime: 1
+            resourceTempFilePath: /home/runner/.free-server/resource
+            ENDOFYAML
+          fi
+
+      - name: Clone blog repo to test SSH
+        env:
+          PAGES_REPO: ${{ secrets.PAGES_REPO }}
+        run: |
+          if [ -n "$PAGES_REPO" ]; then
+            echo "Testing SSH connection to GitHub..."
+            ssh -T git@github.com || echo "SSH connection test completed"
+            
+            echo "Cloning blog repo..."
+            git clone git@github.com:$PAGES_REPO /home/runner/.free-server/test-repo || echo "Clone may have failed"
+          fi
 
       - name: Download and build project
         run: |
@@ -63,11 +123,24 @@ jobs:
           cd postpone
           java -Duser.home=/home/runner -jar target/postpone-2.0.jar || echo "Execution finished"
 
+      - name: Check blog repo for updates
+        env:
+          PAGES_REPO: ${{ secrets.PAGES_REPO }}
+        run: |
+          if [ -n "$PAGES_REPO" ]; then
+            echo "Checking blog repo..."
+            if [ -d "/home/runner/.free-server/repo/.git" ]; then
+              cd /home/runner/.free-server/repo
+              git log --oneline -5 || echo "No git history"
+            fi
+          fi
+
       - name: Send notification via PushPlus
         if: always()
         run: |
-          if [ "${{ job.status }}" = "success" ]; then
+          STATUS="${{ job.status }}"
+          if [ "$STATUS" = "success" ]; then
             curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Success&content=服务器延期成功完成！"
           else
-            curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Failed&content=服务器延期失败，请检查配置！"
+            curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Failed&content=服务器延期失败，请检查配置！Job status: $STATUS"
           fi
