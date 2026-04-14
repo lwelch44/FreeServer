@@ -20,34 +20,50 @@ jobs:
           java-version: '8'
           distribution: 'temurin'
 
-      - name: Convert OpenSSH key to PEM
+      - name: Setup SSH manually (bypass ssh-agent)
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
-          # 保存 OpenSSH 密钥到文件
-          echo "$SSH_PRIVATE_KEY" | base64 -d > /tmp/private_key
+          # 创建 SSH 目录
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           
-          # 检查文件内容
-          echo "Key type:"
-          head -c 20 /tmp/private_key | xxd | head -5
+          # 保存私钥
+          echo "$SSH_PRIVATE_KEY" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
           
-          # 尝试生成 PEM 格式的密钥对
-          ssh-keygen -f /tmp/private_key -y > /tmp/public_key 2>/dev/null || echo "Failed to extract public key"
+          # 生成公钥
+          ssh-keygen -y -f ~/.ssh/id_rsa > ~/.ssh/id_rsa.pub 2>/dev/null || echo "Failed to generate public key"
           
-          # 直接尝试使用原始密钥（可能可以工作）
-          echo "Using original OpenSSH key with ssh-agent"
-
-      - name: Setup SSH Key for GitHub Pages
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # 创建 SSH config
+          cat > ~/.ssh/config << EOF
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+          EOF
+          
+          # 添加 GitHub 到 known_hosts
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          
+          # 测试连接
+          echo "Testing SSH connection..."
+          ssh -T git@github.com || echo "SSH test completed (exit code: $?)"
+          
+          # 如果 PAGES_REPO 存在，测试克隆
+          if [ -n "$PAGES_REPO" ]; then
+            echo "Testing clone of blog repo..."
+            rm -rf /tmp/test-repo
+            git clone git@github.com:$PAGES_REPO /tmp/test-repo || echo "Clone test completed (exit code: $?)"
+          fi
 
       - name: Configure Git
         run: |
           git config --global user.name "lwelch44"
           git config --global user.email "lihao574403035@gmail.com"
-          # 添加 GitHub 到 known_hosts
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       - name: Create directories
         run: |
@@ -97,18 +113,6 @@ jobs:
             ENDOFYAML
           fi
 
-      - name: Clone blog repo to test SSH
-        env:
-          PAGES_REPO: ${{ secrets.PAGES_REPO }}
-        run: |
-          if [ -n "$PAGES_REPO" ]; then
-            echo "Testing SSH connection to GitHub..."
-            ssh -T git@github.com || echo "SSH connection test completed"
-            
-            echo "Cloning blog repo..."
-            git clone git@github.com:$PAGES_REPO /home/runner/.free-server/test-repo || echo "Clone may have failed"
-          fi
-
       - name: Download and build project
         run: |
           git clone https://github.com/lwelch44/FreeServer.git temp-repo
@@ -123,15 +127,22 @@ jobs:
           cd postpone
           java -Duser.home=/home/runner -jar target/postpone-2.0.jar || echo "Execution finished"
 
-      - name: Check blog repo for updates
+      - name: Check if blog was updated
         env:
           PAGES_REPO: ${{ secrets.PAGES_REPO }}
         run: |
           if [ -n "$PAGES_REPO" ]; then
-            echo "Checking blog repo..."
+            echo "Checking blog repo updates..."
             if [ -d "/home/runner/.free-server/repo/.git" ]; then
               cd /home/runner/.free-server/repo
-              git log --oneline -5 || echo "No git history"
+              echo "Latest commits:"
+              git log --oneline -3 2>/dev/null || echo "No git history"
+              
+              # 检查是否有新文件
+              echo -e "\nFiles in repo:"
+              find . -type f -name "*.md" -o -name "*.html" | head -10
+            else
+              echo "Blog repo directory not found"
             fi
           fi
 
@@ -140,7 +151,7 @@ jobs:
         run: |
           STATUS="${{ job.status }}"
           if [ "$STATUS" = "success" ]; then
-            curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Success&content=服务器延期成功完成！"
+            curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Success&content=服务器延期成功完成！博客已更新。"
           else
             curl -s -X POST "https://www.pushplus.plus/send?token=ff015b049b064d1bbf8e064729e90e4e&title=FreeServer Failed&content=服务器延期失败，请检查配置！Job status: $STATUS"
           fi
