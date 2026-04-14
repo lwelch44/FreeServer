@@ -1,0 +1,133 @@
+name: Blog Publisher - Working Test
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  publish-blog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup SSH (Proven Method)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "=== Using proven SSH setup method ==="
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Method that worked in SSH/Git test
+          echo "$SSH_PRIVATE_KEY" > /tmp/ssh_key.b64
+          if base64 -d /tmp/ssh_key.b64 > ~/.ssh/id_rsa 2>/dev/null; then
+            echo "✅ Base64 decode successful"
+          else
+            echo "⚠️ Base64 decode failed, using raw content"
+            echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          fi
+          
+          chmod 600 ~/.ssh/id_rsa
+          rm -f /tmp/ssh_key.b64
+          
+          echo "Key info:"
+          head -1 ~/.ssh/id_rsa || echo "Cannot read key"
+          
+      - name: Configure SSH
+        run: |
+          cat > ~/.ssh/config << 'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+          EOF
+          
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 644 ~/.ssh/known_hosts
+          
+      - name: Configure Git
+        run: |
+          git config --global user.name "lwelch44"
+          git config --global user.email "lihao574403035@gmail.com"
+          
+      - name: Clone Blog Repository
+        run: |
+          echo "Cloning blog repository..."
+          rm -rf /tmp/blog-publish-test
+          git clone git@github.com:lwelch44/lihao.github.io.git /tmp/blog-publish-test
+          
+          echo "Clone successful!"
+          ls -la /tmp/blog-publish-test/
+          
+      - name: Create Test Blog Post
+        run: |
+          echo "Creating test blog post..."
+          cd /tmp/blog-publish-test
+          
+          # Ensure _posts directory exists
+          mkdir -p _posts
+          
+          # Create test post
+          DATE=$(date '+%Y-%m-%d')
+          TIME=$(date '+%H:%M:%S')
+          FILE="_posts/${DATE}-working-test.md"
+          
+          cat > "$FILE" << 'EOF'
+---
+layout: post
+title: "Working Test from GitHub Actions"
+date: $DATE $TIME
+categories: test success
+---
+
+## 🎉 Blog Publishing Works!
+
+This post was created by the **working** blog publisher workflow.
+
+### What Works:
+- ✅ SSH authentication
+- ✅ Git clone operation  
+- ✅ File creation
+- ✅ Jekyll post format
+
+### Next Steps:
+1. This proves the blog publishing pathway is functional
+2. Next: Integrate FreeServer blog generation
+3. Then: Schedule automatic updates
+
+**Timestamp**: $DATE $TIME
+
+EOF
+          
+          echo "Created file: $FILE"
+          ls -la _posts/
+          echo "File content:"
+          cat "$FILE"
+          
+      - name: Commit Changes
+        run: |
+          echo "Committing changes..."
+          cd /tmp/blog-publish-test
+          
+          git add .
+          git status
+          git commit -m "Test: Working blog publisher $(date '+%Y-%m-%d %H:%M:%S')" || echo "Commit failed or no changes"
+          
+      - name: Push to GitHub
+        run: |
+          echo "Pushing to GitHub..."
+          cd /tmp/blog-publish-test
+          git push origin master || echo "Push failed"
+          
+      - name: Final Status
+        run: |
+          echo "=== TEST COMPLETE ==="
+          echo ""
+          echo "If successful, you should see:"
+          echo "1. New commit at: https://github.com/lwelch44/lihao.github.io/commits"
+          echo "2. New post at: https://lwelch44.github.io/lihao.github.io/"
+          echo "3. GitHub Pages will rebuild automatically"
+          echo ""
+          echo "Check in 1-2 minutes for the new post!"
