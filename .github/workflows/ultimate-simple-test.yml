@@ -1,0 +1,72 @@
+name: Ultimate Simple Blog Test
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  blog-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup SSH (Proven Working Method)
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > /tmp/key.b64
+          base64 -d /tmp/key.b64 > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          rm /tmp/key.b64
+          
+          cat > ~/.ssh/config << 'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+          EOF
+          
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          
+      - name: Configure Git
+        run: |
+          git config --global user.name "lwelch44"
+          git config --global user.email "lihao574403035@gmail.com"
+          
+      - name: Clone Blog Repo
+        run: |
+          rm -rf /tmp/ultimate-blog-test
+          git clone git@github.com:lwelch44/lihao.github.io.git /tmp/ultimate-blog-test
+          
+      - name: Create Simple Test File
+        run: |
+          echo "=== Creating test file in current directory ==="
+          cd /tmp/ultimate-blog-test
+          
+          # Create a simple text file instead of Jekyll post
+          echo "Test from GitHub Actions - $(date)" > test.txt
+          echo "This proves file creation and git operations work." >> test.txt
+          
+          echo "Current directory: $(pwd)"
+          echo "Files created:"
+          ls -la
+          
+      - name: Commit and Push
+        run: |
+          cd /tmp/ultimate-blog-test
+          git add .
+          git commit -m "ULTIMATE TEST: Simple file creation $(date '+%Y-%m-%d %H:%M:%S')" || echo "Commit failed or no changes"
+          git push origin master || echo "Push failed"
+          
+      - name: Verify
+        run: |
+          echo "=== ULTIMATE TEST COMPLETE ==="
+          echo ""
+          echo "Check: https://github.com/lwelch44/lihao.github.io/commits"
+          echo "Blog: https://lwelch44.github.io/lihao.github.io/"
+          echo ""
+          echo "If test.txt appears in repository, the pathway works!"
