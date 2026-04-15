@@ -1,0 +1,293 @@
+name: Ultimate Blog Diagnosis
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Show Environment Info
+        run: |
+          echo "=== ENVIRONMENT INFO ==="
+          echo "Runner OS: $(uname -a)"
+          echo "Git version: $(git --version)"
+          echo "SSH version: $(ssh -V 2>&1)"
+          echo "Working directory: $(pwd)"
+          echo "GitHub Repository: ${{ github.repository }}"
+          echo "Event: ${{ github.event_name }}"
+          echo "========================="
+          
+      - name: Verify GitHub Secrets Exist
+        run: |
+          echo "=== VERIFY SECRETS EXIST ==="
+          echo "SSH_PRIVATE_KEY length: ${#SSH_PRIVATE_KEY}"
+          echo "PAGES_REPO: ${{ secrets.PAGES_REPO }}"
+          echo "PushPlus Token length: ${#PUSHPLUS_TOKEN}"
+          echo "============================"
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+      
+      - name: Test SSH Key Format
+        run: |
+          echo "=== TEST SSH KEY FORMAT ==="
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Save the key
+          echo "$SSH_PRIVATE_KEY" > /tmp/key.b64
+          
+          # Method 1: Try base64 decode
+          echo "Method 1: Base64 decode"
+          if base64 -d /tmp/key.b64 > ~/.ssh/id_rsa 2>/dev/null; then
+            echo "✅ Base64 decode successful"
+            echo "Key type: $(head -1 ~/.ssh/id_rsa)"
+            echo "Key size: $(wc -c < ~/.ssh/id_rsa) bytes"
+          else
+            echo "❌ Base64 decode failed, trying raw format"
+            echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          fi
+          
+          # Check key format
+          echo "=== KEY FORMAT ANALYSIS ==="
+          if grep -q "BEGIN OPENSSH PRIVATE KEY" ~/.ssh/id_rsa; then
+            echo "Key format: OpenSSH (new format)"
+          elif grep -q "BEGIN RSA PRIVATE KEY" ~/.ssh/id_rsa; then
+            echo "Key format: RSA (PEM format)"
+          elif grep -q "BEGIN PRIVATE KEY" ~/.ssh/id_rsa; then
+            echo "Key format: Generic PEM"
+          else
+            echo "❌ Unknown key format"
+            echo "First 100 chars:"
+            head -c 100 ~/.ssh/id_rsa
+          fi
+          
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Create SSH config
+          cat > ~/.ssh/config << 'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+          EOF
+          
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Test SSH Connection to GitHub
+        run: |
+          echo "=== SSH CONNECTION TEST ==="
+          echo "Testing SSH connection to GitHub..."
+          
+          # Test 1: Simple connection
+          ssh -T git@github.com 2>&1 | tee /tmp/ssh-test.txt || true
+          
+          echo "=== SSH TEST RESULTS ==="
+          if grep -q "successfully authenticated" /tmp/ssh-test.txt; then
+            echo "✅ SSH authentication successful"
+          elif grep -q "Permission denied" /tmp/ssh-test.txt; then
+            echo "❌ SSH Permission denied"
+            echo "Full error:"
+            cat /tmp/ssh-test.txt
+          elif grep -q "Could not resolve hostname" /tmp/ssh-test.txt; then
+            echo "❌ Network issue: Cannot resolve github.com"
+          else
+            echo "⚠️ SSH test completed with output:"
+            cat /tmp/ssh-test.txt
+          fi
+      
+      - name: Test Git Clone (Read Access)
+        run: |
+          echo "=== GIT CLONE TEST ==="
+          echo "Testing Git clone from blog repository..."
+          
+          # Get blog repo from secret
+          BLOG_REPO="git@github.com:${{ secrets.PAGES_REPO }}.git"
+          echo "Blog repository: $BLOG_REPO"
+          
+          rm -rf /tmp/test-clone
+          set +e
+          git clone "$BLOG_REPO" /tmp/test-clone 2>&1 | tee /tmp/clone-output.txt
+          CLONE_EXIT=$?
+          set -e
+          
+          echo "=== CLONE TEST RESULTS ==="
+          echo "Exit code: $CLONE_EXIT"
+          
+          if [ $CLONE_EXIT -eq 0 ]; then
+            echo "✅ Git clone successful"
+            echo "Repository contents:"
+            ls -la /tmp/test-clone/
+            
+            # Check if it's a Jekyll blog
+            if [ -f "/tmp/test-clone/_config.yml" ]; then
+              echo "✅ Repository contains Jekyll structure"
+            else
+              echo "⚠️ Repository does not have Jekyll structure"
+            fi
+          else
+            echo "❌ Git clone failed"
+            echo "Error output:"
+            cat /tmp/clone-output.txt
+            
+            # Try HTTPS as fallback
+            echo "=== TRYING HTTPS CLONE ==="
+            HTTPS_REPO="https://github.com/${{ secrets.PAGES_REPO }}.git"
+            git clone "$HTTPS_REPO" /tmp/test-clone-https 2>&1 | tee /tmp/clone-https-output.txt
+            HTTPS_EXIT=$?
+            
+            if [ $HTTPS_EXIT -eq 0 ]; then
+              echo "✅ HTTPS clone successful (SSH may be blocked)"
+            else
+              echo "❌ HTTPS clone also failed"
+            fi
+          fi
+      
+      - name: Test Git Push (Write Access)
+        run: |
+          echo "=== GIT PUSH TEST ==="
+          
+          if [ ! -d "/tmp/test-clone/.git" ]; then
+            echo "⚠️ Skipping push test - repository not cloned"
+            exit 0
+          fi
+          
+          cd /tmp/test-clone
+          
+          # Configure git identity
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+          
+          # Create test file
+          TEST_FILE="test-push-$(date +%s).txt"
+          echo "Test file for write permission - $(date)" > "$TEST_FILE"
+          
+          echo "Attempting to add and commit..."
+          set +e
+          git add "$TEST_FILE" 2>&1 | tee /tmp/git-add-output.txt
+          ADD_EXIT=$?
+          set -e
+          
+          if [ $ADD_EXIT -eq 0 ]; then
+            echo "✅ Git add successful"
+            
+            git commit -m "Test write permission $(date '+%Y-%m-%d %H:%M:%S')" 2>&1 | tee /tmp/git-commit-output.txt
+            COMMIT_EXIT=$?
+            
+            if [ $COMMIT_EXIT -eq 0 ]; then
+              echo "✅ Git commit successful"
+              
+              echo "Attempting to push..."
+              git push origin master 2>&1 | tee /tmp/git-push-output.txt
+              PUSH_EXIT=$?
+              
+              if [ $PUSH_EXIT -eq 0 ]; then
+                echo "🎉 GIT PUSH SUCCESSFUL!"
+                echo "✅ Blog repository has write access"
+                
+                # Clean up the test commit
+                echo "Cleaning up test commit..."
+                git push origin :master 2>&1 || true
+              else
+                echo "❌ Git push failed"
+                echo "Push error:"
+                tail -20 /tmp/git-push-output.txt
+              fi
+            else
+              echo "❌ Git commit failed"
+            fi
+          else
+            echo "❌ Git add failed"
+          fi
+      
+      - name: Generate Diagnosis Report
+        run: |
+          echo "=== DIAGNOSIS REPORT ==="
+          echo ""
+          echo "Summary of findings:"
+          echo ""
+          
+          # Check SSH connection
+          if [ -f "/tmp/ssh-test.txt" ]; then
+            if grep -q "successfully authenticated" /tmp/ssh-test.txt; then
+              echo "✅ SSH Authentication: WORKING"
+            else
+              echo "❌ SSH Authentication: FAILED"
+            fi
+          fi
+          
+          # Check Git clone
+          if [ -f "/tmp/clone-output.txt" ]; then
+            if grep -q "Cloning into" /tmp/clone-output.txt && ! grep -q "fatal:" /tmp/clone-output.txt; then
+              echo "✅ Git Clone: WORKING"
+            else
+              echo "❌ Git Clone: FAILED"
+              echo "   Error: $(grep -i 'fatal\|error' /tmp/clone-output.txt | head -1)"
+            fi
+          fi
+          
+          # Check Git push
+          if [ -f "/tmp/git-push-output.txt" ]; then
+            if grep -q "Everything up-to-date" /tmp/git-push-output.txt || grep -q "To github.com" /tmp/git-push-output.txt; then
+              echo "✅ Git Push: WORKING"
+            else
+              echo "❌ Git Push: FAILED"
+              echo "   Error: $(grep -i 'fatal\|error\|denied' /tmp/git-push-output.txt | head -1)"
+            fi
+          fi
+          
+          echo ""
+          echo "=== RECOMMENDATIONS ==="
+          echo ""
+          
+          # If SSH failed but HTTPS works
+          if [ -d "/tmp/test-clone-https" ]; then
+            echo "1. SSH authentication failed but HTTPS works."
+            echo "   Recommendation: Use HTTPS instead of SSH in workflows"
+            echo "   Or regenerate SSH key and ensure it's added to GitHub"
+          fi
+          
+          # If clone failed
+          if [ ! -d "/tmp/test-clone/.git" ] && [ ! -d "/tmp/test-clone-https/.git" ]; then
+            echo "1. Cannot clone repository at all."
+            echo "   Check: Repository ${{ secrets.PAGES_REPO }} exists and is accessible"
+            echo "   Check: SSH key has read access to the repository"
+          fi
+          
+          # If push failed but clone worked
+          if [ -d "/tmp/test-clone/.git" ] && [ -f "/tmp/git-push-output.txt" ] && ! grep -q "Everything up-to-date" /tmp/git-push-output.txt && ! grep -q "To github.com" /tmp/git-push-output.txt; then
+            echo "1. Can clone but cannot push."
+            echo "   Recommendation: Ensure SSH key has WRITE permission (not just read)"
+            echo "   Check: https://github.com/settings/keys - enable 'Allow write access'"
+          fi
+          
+          echo ""
+          echo "=== NEXT STEPS ==="
+          echo "1. Review the detailed logs above"
+          echo "2. Fix identified issues"
+          echo "3. Re-run this diagnosis after fixes"
+          echo "4. Once all tests pass, the blog automation should work"
+      
+      - name: Upload Detailed Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blog-diagnosis-logs
+          path: |
+            /tmp/ssh-test.txt
+            /tmp/clone-output.txt
+            /tmp/clone-https-output.txt
+            /tmp/git-add-output.txt
+            /tmp/git-commit-output.txt
+            /tmp/git-push-output.txt
+          retention-days: 7
