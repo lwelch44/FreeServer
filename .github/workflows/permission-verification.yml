@@ -1,0 +1,179 @@
+name: Permission Verification Test
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  verify-permissions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup SSH and Show Debug Info
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "=== PERMISSION VERIFICATION TEST ==="
+          echo "Time: $(date)"
+          echo ""
+          
+          # Setup SSH
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          echo "Key length: ${#SSH_PRIVATE_KEY} characters"
+          echo "Key first 100 chars: ${SSH_PRIVATE_KEY:0:100}"
+          
+          # Save key
+          echo "$SSH_PRIVATE_KEY" > /tmp/ssh_key.b64
+          
+          # Try different decoding methods
+          echo ""
+          echo "=== Key Format Test ==="
+          
+          # Method 1: Base64 decode
+          if base64 -d /tmp/ssh_key.b64 > ~/.ssh/id_rsa 2>/dev/null; then
+            echo "✅ Method 1: Base64 decode successful"
+            echo "   Key type: $(head -1 ~/.ssh/id_rsa)"
+          else
+            echo "❌ Method 1: Base64 decode failed"
+          fi
+          
+          # Method 2: Use as raw
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa_raw
+          echo "✅ Method 2: Saved as raw key"
+          echo "   Raw key first line: $(head -1 ~/.ssh/id_rsa_raw 2>/dev/null || echo 'Cannot read')"
+          
+          # Use the one that worked
+          if [ -f ~/.ssh/id_rsa ] && [ -s ~/.ssh/id_rsa ]; then
+            cp ~/.ssh/id_rsa ~/.ssh/id_rsa_final
+          else
+            cp ~/.ssh/id_rsa_raw ~/.ssh/id_rsa_final
+          fi
+          
+          chmod 600 ~/.ssh/id_rsa_final
+          
+          # SSH config
+          cat > ~/.ssh/config << 'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/id_rsa_final
+            StrictHostKeyChecking no
+          EOF
+          
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          
+      - name: Test SSH Connection with Verbose
+        run: |
+          echo "=== SSH CONNECTION TEST ==="
+          echo "Testing connection to GitHub..."
+          
+          # Test 1: Simple connection
+          ssh -T git@github.com 2>&1 | head -20 || echo "SSH connection test completed"
+          
+          echo ""
+          echo "=== Testing Git Operations ==="
+          
+      - name: Test Git Clone (Read Permission)
+        run: |
+          echo "Test 1: Clone repository (read permission)"
+          rm -rf /tmp/test-clone-read
+          
+          set +e  # Don't exit on error
+          git clone git@github.com:lwelch44/lihao.github.io.git /tmp/test-clone-read 2>&1 | tee /tmp/clone-output.txt
+          CLONE_EXIT=$?
+          
+          echo "Git clone exit code: $CLONE_EXIT"
+          
+          if [ $CLONE_EXIT -eq 0 ]; then
+            echo "✅ READ permission: SUCCESS - Can clone repository"
+            echo "Repository contents:"
+            ls -la /tmp/test-clone-read/
+          else
+            echo "❌ READ permission: FAILED - Cannot clone repository"
+            echo "Error output (last 20 lines):"
+            tail -20 /tmp/clone-output.txt
+          fi
+          
+      - name: Test Git Push (Write Permission)
+        run: |
+          echo ""
+          echo "Test 2: Test write permission"
+          
+          if [ -d "/tmp/test-clone-read/.git" ]; then
+            cd /tmp/test-clone-read
+            
+            # Create test file
+            echo "Test file for write permission $(date)" > test-write-permission.txt
+            
+            # Try to add and commit
+            git add test-write-permission.txt 2>&1 | tee /tmp/git-add-output.txt
+            ADD_EXIT=$?
+            
+            if [ $ADD_EXIT -eq 0 ]; then
+              echo "✅ Can add files to git"
+              
+              # Try to commit
+              git commit -m "Test write permission $(date '+%Y-%m-%d %H:%M:%S')" 2>&1 | tee /tmp/git-commit-output.txt
+              COMMIT_EXIT=$?
+              
+              if [ $COMMIT_EXIT -eq 0 ]; then
+                echo "✅ Can commit changes"
+                
+                # Try to push
+                echo "Attempting to push..."
+                git push origin master 2>&1 | tee /tmp/git-push-output.txt
+                PUSH_EXIT=$?
+                
+                if [ $PUSH_EXIT -eq 0 ]; then
+                  echo "🎉 WRITE permission: SUCCESS - Can push to repository!"
+                  echo "This means SSH key has full write access."
+                else
+                  echo "❌ WRITE permission: FAILED - Cannot push to repository"
+                  echo "Push error (last 20 lines):"
+                  tail -20 /tmp/git-push-output.txt
+                  echo ""
+                  echo "This likely means SSH key has only READ permission."
+                fi
+              else
+                echo "❌ Cannot commit changes"
+              fi
+            else
+              echo "❌ Cannot add files to git"
+            fi
+          else
+            echo "⚠️ Skipping write test - repository not cloned"
+          fi
+          
+      - name: Diagnosis Summary
+        run: |
+          echo ""
+          echo "=== DIAGNOSIS SUMMARY ==="
+          echo ""
+          echo "Based on tests above:"
+          echo ""
+          
+          if [ -f "/tmp/clone-output.txt" ]; then
+            if grep -q "Permission denied" /tmp/clone-output.txt; then
+              echo "❌ SSH KEY ISSUE: Permission denied"
+              echo "   - SSH key may not be associated with your GitHub account"
+              echo "   - SSH key may be expired or revoked"
+              echo "   - Check: https://github.com/settings/keys"
+            elif grep -q "Could not read from remote repository" /tmp/clone-output.txt; then
+              echo "❌ REPOSITORY ACCESS ISSUE: Cannot read repository"
+              echo "   - Repository may not exist: lwelch44/lihao.github.io"
+              echo "   - Repository may be private"
+              echo "   - Check: https://github.com/lwelch44/lihao.github.io"
+            fi
+          fi
+          
+          echo ""
+          echo "=== RECOMMENDED ACTIONS ==="
+          echo "1. Check SSH key permissions: https://github.com/settings/keys"
+          echo "2. Ensure key 'FreeServer-Blog-Auto' has WRITE permission"
+          echo "3. Verify repository exists: https://github.com/lwelch44/lihao.github.io"
+          echo "4. If problems persist, generate new SSH key pair"
+          echo ""
