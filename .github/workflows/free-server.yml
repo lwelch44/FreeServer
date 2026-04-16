@@ -87,9 +87,34 @@ jobs:
         run: |
           echo "Creating configuration..."
           
-          # Create config file without heredoc to avoid YAML parsing issues
-          printf 'cloudServers:\n  - username: "%s"\n  password: "%s"\n  type: 0\n\nblogInfo:\n  uri: git@github.com:lwelch44/lihao.github.io.git\n  localPath: /home/runner/.free-server/repo\n  username: lwelch44\n' \
-            "$CLOUD_USERNAME" "$CLOUD_PASSWORD" > /home/runner/.free-server/application-config.yml
+          # Create config with paths writable in GitHub Actions
+          mkdir -p /home/runner/.free-server/phantomJsPic
+          mkdir -p /home/runner/.free-server/resource
+          
+          cat > /home/runner/.free-server/application-config.yml << 'EOFCONFIG'
+cloudServers:
+  - username: "CLOUD_USERNAME_PLACEHOLDER"
+    password: "CLOUD_PASSWORD_PLACEHOLDER"
+    type: 0
+
+blogInfo:
+  uri: git@github.com:lwelch44/lihao.github.io.git
+  localPath: /home/runner/.free-server/repo
+  username: lwelch44
+
+phantomJs:
+  phantomJsExec:
+    picPath: /home/runner/.free-server/phantomJsPic/postpone.png
+
+blogInitWaitCount: 10
+blogInitWaitTime: 1
+
+resourceTempFilePath: /home/runner/.free-server/resource
+EOFCONFIG
+          
+          # Replace placeholders with actual secrets
+          sed -i "s/CLOUD_USERNAME_PLACEHOLDER/$CLOUD_USERNAME/" /home/runner/.free-server/application-config.yml
+          sed -i "s/CLOUD_PASSWORD_PLACEHOLDER/$CLOUD_PASSWORD/" /home/runner/.free-server/application-config.yml
           
           echo "Configuration created"
           
