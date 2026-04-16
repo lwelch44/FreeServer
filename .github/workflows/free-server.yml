@@ -101,6 +101,15 @@ jobs:
           echo "  uri: git@github.com:lwelch44/lihao.github.io.git" >> /home/runner/.free-server/application-config.yml
           echo "  localPath: /home/runner/.free-server/repo" >> /home/runner/.free-server/application-config.yml
           echo "  username: lwelch44" >> /home/runner/.free-server/application-config.yml
+          echo "" >> /home/runner/.free-server/application-config.yml
+          echo "phantomJs:" >> /home/runner/.free-server/application-config.yml
+          echo "  phantomJsExec:" >> /home/runner/.free-server/application-config.yml
+          echo "    picPath: /home/runner/.free-server/phantomJsPic/postpone.png" >> /home/runner/.free-server/application-config.yml
+          echo "" >> /home/runner/.free-server/application-config.yml
+          echo "blogInitWaitCount: 10" >> /home/runner/.free-server/application-config.yml
+          echo "blogInitWaitTime: 1" >> /home/runner/.free-server/application-config.yml
+          echo "" >> /home/runner/.free-server/application-config.yml
+          echo "resourceTempFilePath: /home/runner/.free-server/resource" >> /home/runner/.free-server/application-config.yml
           
           echo "Configuration created"
           
