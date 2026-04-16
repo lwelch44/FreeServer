@@ -106,9 +106,17 @@ jobs:
           fi
           
           cd postpone
-          chmod +x mvnw
-          echo "Running Maven build..."
-          ./mvnw clean package -DskipTests 2>&1 | tail -50
+          
+          # Check if mvn wrapper exists, otherwise use system mvn
+          if [ -f ".mvn/wrapper/maven-wrapper.jar" ]; then
+            chmod +x mvnw
+            echo "Running Maven build (wrapper)..."
+            ./mvnw clean package -DskipTests 2>&1 | tail -50
+          else
+            echo "Running Maven build (system)..."
+            mvn clean package -DskipTests 2>&1 | tail -50
+          fi
+          
           echo "Build completed"
           
       - name: Run FreeServer
