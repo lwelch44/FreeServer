@@ -86,11 +86,10 @@ jobs:
           CLOUD_PASSWORD: ${{ secrets.CLOUD_PASSWORD_ABEIYUN }}
         run: |
           echo "Creating configuration..."
-          
-          cat > /home/runner/.free-server/application-config.yml << 'EOF'
+          |
+          cat > /home/runner/.free-server/application-config.yml << 'EOFCONFIG'
 cloudServers:
-  -
-    username: "$CLOUD_USERNAME"
+  - username: "$CLOUD_USERNAME"
     password: "$CLOUD_PASSWORD"
     type: 0
 
@@ -98,16 +97,7 @@ blogInfo:
   uri: git@github.com:lwelch44/lihao.github.io.git
   localPath: /home/runner/.free-server/repo
   username: lwelch44
-
-phantomJs:
-  phantomJsExec:
-    picPath: /home/runner/.free-server/phantomJsPic/postpone.png
-
-blogInitWaitCount: 10
-blogInitWaitTime: 1
-
-resourceTempFilePath: /home/runner/.free-server/resource
-EOF
+EOFCONFIG
           
           echo "Configuration created at /home/runner/.free-server/application-config.yml"
           
