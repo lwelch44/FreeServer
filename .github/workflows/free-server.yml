@@ -141,6 +141,10 @@ jobs:
           
       - name: Run FreeServer
         run: |
+          echo "Setting up symlink for hardcoded paths..."
+          # Create symlink from /freeServer (hardcoded in code) to writable location
+          sudo ln -s /home/runner/.free-server /freeServer || true
+          
           echo "Running FreeServer..."
           cd postpone
           java -Duser.home=/home/runner -jar target/postpone.jar 2>&1 | tee /tmp/freeserver-output.log
