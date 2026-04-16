@@ -143,11 +143,14 @@ jobs:
         run: |
           echo "Setting up symlink for hardcoded paths..."
           # Create symlink from /freeServer (hardcoded in code) to writable location
-          sudo ln -s /home/runner/.free-server /freeServer || true
+          mkdir -p /freeServer 2>/dev/null || true
+          ln -sf /home/runner/.free-server /freeServer 2>/dev/null || sudo ln -sf /home/runner/.free-server /freeServer
           
-          echo "Running FreeServer..."
+          echo "Running FreeServer with 20 min timeout..."
           cd postpone
-          java -Duser.home=/home/runner -jar target/postpone.jar 2>&1 | tee /tmp/freeserver-output.log
+          
+          # Run with timeout to prevent hanging forever
+          timeout 1200 java -Duser.home=/home/runner -jar target/postpone.jar 2>&1 | tee /tmp/freeserver-output.log || echo "FreeServer timed out or completed"
           
           echo "FreeServer output saved to /tmp/freeserver-output.log"
           
