@@ -123,7 +123,7 @@ jobs:
         run: |
           echo "Running FreeServer..."
           cd postpone
-          java -Duser.home=/home/runner -jar target/postpone-2.0.jar 2>&1 | tee /tmp/freeserver-output.log
+          java -Duser.home=/home/runner -jar target/postpone.jar 2>&1 | tee /tmp/freeserver-output.log
           
           echo "FreeServer output saved to /tmp/freeserver-output.log"
           
